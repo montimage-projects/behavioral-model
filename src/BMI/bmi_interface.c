@@ -21,6 +21,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/socket.h>
 
 #include <pcap/pcap.h>
 #include "bmi_interface.h"
@@ -116,6 +117,55 @@ int bmi_interface_add_dumper(bmi_interface_t *bmi, const char *filename, bmi_dum
   return 0;
 }
 
+#define ETHERNET_HEADER_SIZE 14  // Ethernet header size (without VLAN tag)
+#define VLAN_TAG_SIZE 4          // VLAN tag size
+#define TPID_VLAN 0x8100         // TPID indicating a VLAN-tagged frame
+
+/* Structure of an Ethernet frame with a VLAN tag:
+
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|    Destination MAC Address (6 bytes)                           |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|    Source MAC Address (6 bytes)                                |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|    EtherType (2 bytes) (0x8100 for VLAN Tag)                  |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|    VLAN ID (12 bits) | PCP (3 bits) | DEI (1 bit) | Reserved (2 bits) |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|    Payload/Data (46 - 1500 bytes)                              |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|    Frame Check Sequence (FCS) (4 bytes)                        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+*/
+
+// Function to extract the PCP field from a VLAN-tagged Ethernet frame
+int extract_pcp(const uint8_t *frame, size_t frame_length) {
+    if (frame_length < ETHERNET_HEADER_SIZE + VLAN_TAG_SIZE) {
+        //printf("Frame is too short to contain a VLAN tag.\n");
+        return -1;  // Indicate error
+    }
+
+    // Check if the frame contains a VLAN tag by examining the EtherType/TPID field
+    uint16_t ether_type;
+    memcpy(&ether_type, frame + 12, sizeof(ether_type));  // EtherType is after 12 bytes
+    ether_type = ntohs(ether_type);  // Convert from network byte order to host byte order
+
+    if (ether_type == TPID_VLAN) {
+        // Frame contains a VLAN tag
+        uint16_t tci;  // Tag Control Information (TCI)
+        memcpy(&tci, frame + ETHERNET_HEADER_SIZE, sizeof(tci));  // TCI starts after Ethernet header
+        tci = ntohs(tci);  // Convert from network byte order to host byte order
+
+        // Extract the PCP field (first 3 bits of TCI)
+        int pcp = (tci >> 13) & 0x07;  // Right shift by 13 bits, mask the first 3 bits (PCP)
+
+        return pcp;  // Return the extracted PCP value
+    } else {
+        //printf("No VLAN tag present in the frame.\n");
+        return -1;  // Indicate error
+    }
+}
+
 int bmi_interface_send(bmi_interface_t *bmi, const char *data, int len) {
   if(bmi->pcap_output_dumper) {
     struct pcap_pkthdr pkt_header;
@@ -127,6 +177,12 @@ int bmi_interface_send(bmi_interface_t *bmi, const char *data, int len) {
 	      (unsigned char *) data);
     pcap_dump_flush(bmi->pcap_output_dumper);
   }
+
+  //update skb->priority based on PCP field of vlan
+  int pcp = extract_pcp( data, len );
+  if( pcp >= 0 )
+    setsockopt(pcap_fileno(bmi->pcap), SOL_SOCKET, SO_PRIORITY, &pcp, sizeof(pcp));
+
   return pcap_sendpacket(bmi->pcap, (unsigned char *) data, len);
 }
 
