@@ -260,16 +260,11 @@ SimpleSwitch::receive_(port_t port_num, const char *buffer, int len) {
   Field &f_instance_type = phv->get_field("standard_metadata.instance_type");
   f_instance_type.set(PKT_INSTANCE_TYPE_NORMAL);
 
-  if (phv->has_field("intrinsic_metadata.ingress_global_timestamp")) {
-    phv->get_field("intrinsic_metadata.ingress_global_timestamp")
-        .set(get_ts().count());
-  }
-
   //expose incomming time of the raw packet
   // in microsecond
-  if (phv->has_field("intrinsic_metadata.ingress_system_timestamp")) {
-    phv->get_field("intrinsic_metadata.ingress_system_timestamp")
-        .set( last_recv_pkt_timestamp.tv_sec * 1000000 + last_recv_pkt_timestamp.tv_usec );
+  if (phv->has_field("intrinsic_metadata.ingress_global_timestamp")) {
+    phv->get_field("intrinsic_metadata.ingress_global_timestamp")
+        .set(last_recv_pkt_timestamp.tv_sec * 1000000 + last_recv_pkt_timestamp.tv_usec);
   }
 
   input_buffer->push_front(
