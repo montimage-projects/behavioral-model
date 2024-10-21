@@ -31,6 +31,7 @@ typedef struct bmi_interface_s {
   int fd;
   pcap_dumper_t *pcap_input_dumper;
   pcap_dumper_t *pcap_output_dumper;
+  raw_packet_t last_recv_packet;
 } bmi_interface_t;
 
 /* static get_version(int *x, int *y, int *z) { */
@@ -187,7 +188,7 @@ int bmi_interface_send(bmi_interface_t *bmi, const char *data, int len) {
 }
 
 /* Does not make a copy! */
-int bmi_interface_recv(bmi_interface_t *bmi, const char **data) {
+int bmi_interface_recv(bmi_interface_t *bmi, const raw_packet_t **data) {
   struct pcap_pkthdr *pkt_header;
   const unsigned char *pkt_data;
 
@@ -204,9 +205,22 @@ int bmi_interface_recv(bmi_interface_t *bmi, const char **data) {
     pcap_dump_flush(bmi->pcap_input_dumper);
   }
 
-  *data = (const char *) pkt_data;
+  //*data = (const char *) pkt_data;
+
+  //expose more data than only packet data
+  //update stat
+  bmi->last_recv_packet.time = pkt_header->ts;
+  bmi->last_recv_packet.data = pkt_data;
+  bmi->last_recv_packet.len  = pkt_header->len;
+
+  *data = (const char*) &bmi->last_recv_packet;
 
   return pkt_header->len;
+}
+
+int bmi_interface_stat(bmi_interface_t *bmi, const bmi_interface_stat_t **stat){
+  *stat = &bmi->stat;
+  return 0;
 }
 
 int bmi_interface_recv_with_copy(bmi_interface_t *bmi, char *data, int max_len) {

@@ -265,6 +265,13 @@ SimpleSwitch::receive_(port_t port_num, const char *buffer, int len) {
         .set(get_ts().count());
   }
 
+  //expose incomming time of the raw packet
+  // in microsecond
+  if (phv->has_field("intrinsic_metadata.ingress_system_timestamp")) {
+    phv->get_field("intrinsic_metadata.ingress_system_timestamp")
+        .set( last_recv_pkt_timestamp.tv_sec * 1000000 + last_recv_pkt_timestamp.tv_usec );
+  }
+
   input_buffer->push_front(
       InputBuffer::PacketType::NORMAL, std::move(packet));
   return 0;

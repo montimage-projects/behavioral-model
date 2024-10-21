@@ -40,6 +40,7 @@
 #include <boost/filesystem.hpp>
 
 #include "md5.h"
+#include "bmi_interface.h"
 
 namespace fs = boost::filesystem;
 
@@ -70,6 +71,12 @@ SwitchWContexts::receive(port_t port_num, const char *buffer, int len) {
     Logger::get()->info("Received packet of length {} on port {}: {}",
                         len, port_num, sample_packet_data(buffer, len));
   }
+
+  //decompose buffer which contains raw packet and metadata
+  const raw_packet_t *pkt = (raw_packet_t *) buffer;
+  last_recv_pkt_timestamp = pkt->time;
+  buffer = pkt->data;
+
   return receive_(port_num, buffer, len);
 }
 

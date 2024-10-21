@@ -163,6 +163,7 @@ header_type intrinsic_metadata_t {
     fields {
         ingress_global_timestamp : 48;
         egress_global_timestamp : 48;
+        ingress_system_timestamp: 64;
         mcast_grp : 16;
         egress_rid : 16;
     }
@@ -177,6 +178,8 @@ not be written to.  See Section [BMv2 timestamp implementation notes](#BMv2-time
 starts egress processing. The clock is the same as for
 `ingress_global_timestamp`. This field should only be read from the egress
 pipeline, but should not be written to.
+- `ingress_system_timestamp`: a timestamp, in microsecond since the Epoch, 
+set when the packet arrives at the NIC which was assigned as an igress port.
 - `mcast_grp`: needed for the multicast feature. This field needs to be written
 in the ingress pipeline when you wish the packet to be multicast. A value of 0
 means no multicast, and calling `mark_to_drop` will set the value to 0.

@@ -100,6 +100,9 @@ class Packet;
 class SwitchWContexts : public DevMgr, public RuntimeInterface {
   friend class Switch;
 
+protected:
+ struct timeval last_recv_pkt_timestamp;
+
  public:
   //! To enable live swapping of P4-JSON configurations, enable_swap needs to be
   //! set to `true`. See switch.h documentation for more information on

@@ -28,7 +28,13 @@ typedef enum
     bmi_input_dumper,
     bmi_output_dumper
 }  bmi_dumper_kind_t;
-    
+
+typedef struct {
+  size_t time;
+  int len;
+  const char *data;
+} raw_packet_t;
+
 int bmi_interface_create(bmi_interface_t **bmi, const char *device);
 
 int bmi_interface_add_dumper(bmi_interface_t *bmi, const char *filename, bmi_dumper_kind_t dumper_kind);
@@ -37,7 +43,7 @@ int bmi_interface_destroy(bmi_interface_t *bmi);
 
 int bmi_interface_send(bmi_interface_t *bmi, const char *data, int len);
 
-int bmi_interface_recv(bmi_interface_t *bmi, const char **data);
+int bmi_interface_recv(bmi_interface_t *bmi, const raw_packet_t **data);
 
 int bmi_interface_recv_with_copy(bmi_interface_t *bmi, char *data, int max_len);
 
