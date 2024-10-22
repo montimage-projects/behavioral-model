@@ -30,7 +30,7 @@ typedef enum
 }  bmi_dumper_kind_t;
 
 typedef struct {
-  size_t time;
+  struct timeval time;
   int len;
   const char *data;
 } raw_packet_t;

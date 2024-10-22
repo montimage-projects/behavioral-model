@@ -218,11 +218,6 @@ int bmi_interface_recv(bmi_interface_t *bmi, const raw_packet_t **data) {
   return pkt_header->len;
 }
 
-int bmi_interface_stat(bmi_interface_t *bmi, const bmi_interface_stat_t **stat){
-  *stat = &bmi->stat;
-  return 0;
-}
-
 int bmi_interface_recv_with_copy(bmi_interface_t *bmi, char *data, int max_len) {
   int rv;
   struct pcap_pkthdr *pkt_header;

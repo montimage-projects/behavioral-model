@@ -265,6 +265,8 @@ SimpleSwitch::receive_(port_t port_num, const char *buffer, int len) {
   if (phv->has_field("intrinsic_metadata.ingress_global_timestamp")) {
     phv->get_field("intrinsic_metadata.ingress_global_timestamp")
         .set(last_recv_pkt_timestamp.tv_sec * 1000000 + last_recv_pkt_timestamp.tv_usec);
+
+    //printf("\n ts: %d, usec: %d", last_recv_pkt_timestamp.tv_sec , last_recv_pkt_timestamp.tv_usec );
   }
 
   input_buffer->push_front(
