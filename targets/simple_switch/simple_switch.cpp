@@ -263,10 +263,17 @@ SimpleSwitch::receive_(port_t port_num, const char *buffer, int len) {
   //expose incomming time of the raw packet
   // in microsecond
   if (phv->has_field("intrinsic_metadata.ingress_global_timestamp")) {
-    phv->get_field("intrinsic_metadata.ingress_global_timestamp")
-        .set(last_recv_pkt_timestamp.tv_sec * 1000000 + last_recv_pkt_timestamp.tv_usec);
+    // convert timeval to std::chrono
+    auto durationSinceEpoch = std::chrono::seconds{last_recv_pkt_timestamp.tv_sec} + std::chrono::microseconds{last_recv_pkt_timestamp.tv_usec};
+    clock::time_point duration = std::chrono::system_clock::time_point(durationSinceEpoch);
 
-    //printf("\n ts: %d, usec: %d", last_recv_pkt_timestamp.tv_sec , last_recv_pkt_timestamp.tv_usec );
+    //shift forward to the startup moment of the switch
+    auto ts = std::chrono::duration_cast<ts_res>(duration - start );
+
+    phv->get_field("intrinsic_metadata.ingress_global_timestamp")
+        .set( ts.count() );
+
+    printf("\n ingress_global_timestamp ts: %ld, usec: %ld", last_recv_pkt_timestamp.tv_sec , last_recv_pkt_timestamp.tv_usec );
   }
 
   input_buffer->push_front(
