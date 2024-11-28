@@ -260,20 +260,28 @@ SimpleSwitch::receive_(port_t port_num, const char *buffer, int len) {
   Field &f_instance_type = phv->get_field("standard_metadata.instance_type");
   f_instance_type.set(PKT_INSTANCE_TYPE_NORMAL);
 
-  //expose incomming time of the raw packet
-  // in microsecond
   if (phv->has_field("intrinsic_metadata.ingress_global_timestamp")) {
-    // convert timeval to std::chrono
-    auto durationSinceEpoch = std::chrono::seconds{last_recv_pkt_timestamp.tv_sec} + std::chrono::microseconds{last_recv_pkt_timestamp.tv_usec};
-    clock::time_point duration = std::chrono::system_clock::time_point(durationSinceEpoch);
-
-    //shift forward to the startup moment of the switch
-    auto ts = std::chrono::duration_cast<ts_res>(duration - start );
-
     phv->get_field("intrinsic_metadata.ingress_global_timestamp")
-        .set( ts.count() );
+        .set(get_ts().count());
+  }
 
-    printf("\n ingress_global_timestamp ts: %ld, usec: %ld", last_recv_pkt_timestamp.tv_sec , last_recv_pkt_timestamp.tv_usec );
+  // expose incoming timestamp of the raw packet
+  // in nanosecond
+  // https://github.com/p4lang/p4c/blob/main/backends/tofino/bf-p4c/p4include/tofino2_base.p4#L135
+  if (phv->has_field("intrinsic_metadata.ingress_mac_tstamp")) {
+    //shift forward to the startup moment of the switch
+    auto ts = std::chrono::duration_cast<tick>(rx_stamp_last_packet - start );
+    phv->get_field("intrinsic_metadata.ingress_mac_tstamp")
+        .set( ts.count() );
+  }
+
+  // expose outgoing timestamp of the last packet, not the current one
+  // in nanosecond
+  if (phv->has_field("intrinsic_metadata.egress_mac_last_tstamp")) {
+    //shift forward to the startup moment of the switch
+    auto ts = std::chrono::duration_cast<tick>(tx_stamp_last_packet - start );
+    phv->get_field("intrinsic_metadata.egress_mac_last_tstamp")
+        .set( ts.count() );
   }
 
   input_buffer->push_front(

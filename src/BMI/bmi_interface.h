@@ -30,9 +30,10 @@ typedef enum
 }  bmi_dumper_kind_t;
 
 typedef struct {
-  struct timeval time;
+  struct timespec time;
   int len;
   const char *data;
+  struct timespec last_tx_stamp;
 } raw_packet_t;
 
 int bmi_interface_create(bmi_interface_t **bmi, const char *device);

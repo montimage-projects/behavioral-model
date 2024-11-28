@@ -24,6 +24,8 @@
 #include <sys/socket.h>
 
 #include <pcap/pcap.h>
+#include <errno.h>
+#include <linux/net_tstamp.h>
 #include "bmi_interface.h"
 
 typedef struct bmi_interface_s {
@@ -74,6 +76,16 @@ int bmi_interface_create(bmi_interface_t **bmi, const char *device) {
     return -1;
   }
 #endif
+
+  // Set precision of timestamp to nanosecond
+  //   By default, time stamps are in microseconds.
+  // https://www.tcpdump.org/manpages/pcap_set_tstamp_precision.3pcap.html
+  if(pcap_set_tstamp_precision(bmi_->pcap, PCAP_TSTAMP_PRECISION_NANO) != 0){
+    printf("failled to the precision of the time stamp to nanosecond\n");
+    pcap_close(bmi_->pcap);
+    free(bmi_);
+    return -1;
+  }
 
   if (pcap_activate(bmi_->pcap) != 0) {
     pcap_close(bmi_->pcap);
@@ -167,6 +179,74 @@ int extract_pcp(const uint8_t *frame, size_t frame_length) {
     }
 }
 
+
+int get_tx_timestamp( int sock, struct timespec *tx_timestamp ){
+	struct msghdr msg;
+	struct iovec iov;
+	char control[1024];
+	struct cmsghdr *cmsg;
+	int ret;
+	struct sockaddr_in from_addr;
+	char rcv_data[4096];
+
+	// Retrieve TX timestamp
+	memset(&iov, 0, sizeof(iov));
+	iov.iov_base = (void*) rcv_data;
+	iov.iov_len = sizeof(rcv_data);
+
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+	msg.msg_control = control;
+	msg.msg_controllen = sizeof(control);
+
+	memset(&from_addr, 0, sizeof(from_addr));
+	msg.msg_name = (caddr_t)&from_addr;
+	msg.msg_namelen = sizeof(from_addr);
+
+	/*
+	 * Fetch message from error queue.
+	 * For transmit timestamps the outgoing packet is looped back to
+	 *   the socket"s error queue with the send timestamp(s) attached.
+	 * See 2.1.1 in https://www.kernel.org/doc/html/latest/networking/timestamping.html
+	 */
+	ret = recvmsg(sock, &msg, MSG_ERRQUEUE);
+	if( ret < 0 )
+		printf("recvmsg tx timestamp failed");
+
+	struct timeval now;
+	gettimeofday(&now, 0);
+
+	printf("%ld.%06ld: received %s data, %d bytes from %s, %zu bytes control messages\n",
+	       (long)now.tv_sec, (long)now.tv_usec,
+	       "regular",
+	       ret,
+		   inet_ntoa(from_addr.sin_addr),
+	       msg.msg_controllen);
+
+	// Parse control message for TX timestamp
+	for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+		printf("   cmsg len %zu: ", cmsg->cmsg_len);
+		if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SO_TIMESTAMPING) {
+			struct timespec *ts = (struct timespec *)CMSG_DATA(cmsg);
+			tx_timestamp->tv_sec  = ts->tv_sec;
+			tx_timestamp->tv_nsec = ts->tv_nsec;
+
+			printf("SO_TIMESTAMPING ");
+			printf("SW %ld.%09ld ",
+			       (long)ts->tv_sec,
+			       (long)ts->tv_nsec);
+			ts++;
+							/* skip deprecated HW transformed */
+			ts++;
+			printf("HW raw %ld.%09ld \n",
+				   (long)ts->tv_sec,
+				   (long)ts->tv_nsec);
+			return 0;
+		}
+	}
+	return 1;
+}
 int bmi_interface_send(bmi_interface_t *bmi, const char *data, int len) {
   if(bmi->pcap_output_dumper) {
     struct pcap_pkthdr pkt_header;
@@ -182,9 +262,19 @@ int bmi_interface_send(bmi_interface_t *bmi, const char *data, int len) {
   //update skb->priority based on PCP field of vlan
   int pcp = extract_pcp( data, len );
   if( pcp >= 0 )
-    setsockopt(pcap_fileno(bmi->pcap), SOL_SOCKET, SO_PRIORITY, &pcp, sizeof(pcp));
+    setsockopt( bmi->fd, SOL_SOCKET, SO_PRIORITY, &pcp, sizeof(pcp));
 
-  return pcap_sendpacket(bmi->pcap, (unsigned char *) data, len);
+  int oval = SOF_TIMESTAMPING_TX_SOFTWARE | SOF_TIMESTAMPING_SOFTWARE;
+  if ( setsockopt( bmi->fd, SOL_SOCKET, SO_TIMESTAMPING, &oval, sizeof(oval) ) < 0 ){
+    printf("error when setting timestamping: %s\n", strerror(errno) );
+    exit(1);
+  }
+
+  int ret = pcap_sendpacket(bmi->pcap, (unsigned char *) data, len);
+
+  get_tx_timestamp( bmi->fd, &bmi->last_recv_packet.last_tx_stamp );
+
+  return ret;
 }
 
 /* Does not make a copy! */
@@ -209,7 +299,13 @@ int bmi_interface_recv(bmi_interface_t *bmi, const raw_packet_t **data) {
 
   //expose more data than only packet data
   //update stat
-  bmi->last_recv_packet.time = pkt_header->ts;
+  // Attention: For backward compatibility, time stamps from a capture device
+  //   are always given in seconds and microseconds.
+  //   See https://www.tcpdump.org/manpages/pcap_set_tstamp_precision.3pcap.html
+  // As we set the precision to nanosecond, we need to "consider" tv_usec as tv_nsec
+  bmi->last_recv_packet.time.tv_sec  = pkt_header->ts.tv_sec;
+  bmi->last_recv_packet.time.tv_nsec = pkt_header->ts.tv_usec;
+
   bmi->last_recv_packet.data = pkt_data;
   bmi->last_recv_packet.len  = pkt_header->len;
 
