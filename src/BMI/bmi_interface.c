@@ -292,7 +292,11 @@ int bmi_interface_send(bmi_interface_t *bmi, const char *data, int len) {
   if( pcp >= 0 )
     setsockopt( bmi->fd, SOL_SOCKET, SO_PRIORITY, &pcp, sizeof(pcp));
 
-  int oval = SOF_TIMESTAMPING_TX_SOFTWARE | SOF_TIMESTAMPING_SOFTWARE;
+  int need_to_capture_tx_tstamp = (ptr->tx_timestamp != NULL);
+  int oval = 0; //disable by default
+  if( need_to_capture_tx_tstamp )
+    oval = SOF_TIMESTAMPING_TX_SOFTWARE | SOF_TIMESTAMPING_SOFTWARE;
+
   if ( setsockopt( bmi->fd, SOL_SOCKET, SO_TIMESTAMPING, &oval, sizeof(oval) ) < 0 ){
     printf("error when setting timestamping: %s\n", strerror(errno) );
     exit(1);
@@ -300,7 +304,7 @@ int bmi_interface_send(bmi_interface_t *bmi, const char *data, int len) {
 
   int ret = pcap_sendpacket(bmi->pcap, (unsigned char *) data, len);
 
-  if( ptr->tx_timestamp != NULL )
+  if( need_to_capture_tx_tstamp )
     get_tx_timestamp( bmi->fd, ptr->tx_timestamp );
 
   return ret;
