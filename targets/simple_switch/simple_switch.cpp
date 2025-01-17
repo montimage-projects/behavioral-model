@@ -236,6 +236,14 @@ SimpleSwitch::SimpleSwitch(bool enable_swap, port_t drop_port,
 
 int
 SimpleSwitch::receive_(port_t port_num, const char *buffer, int len) {
+  //decompose buffer which contains raw packet and metadata
+  typedef struct {
+    struct timespec time;
+    const char *data;
+  } raw_pkt_t;
+  raw_pkt_t *raw_pkt = (raw_pkt_t*) buffer;
+  buffer = raw_pkt->data;
+
   // we limit the packet buffer to original size + 512 bytes, which means we
   // cannot add more than 512 bytes of header data to the packet, which should
   // be more than enough
@@ -268,21 +276,13 @@ SimpleSwitch::receive_(port_t port_num, const char *buffer, int len) {
   // expose incoming timestamp of the raw packet
   // in nanosecond
   // https://github.com/p4lang/p4c/blob/main/backends/tofino/bf-p4c/p4include/tofino2_base.p4#L135
-  if (phv->has_field("intrinsic_metadata.ingress_mac_tstamp")) {
-    //shift forward to the startup moment of the switch
-    auto ts = std::chrono::duration_cast<tick>(rx_stamp_last_packet - start );
-    phv->get_field("intrinsic_metadata.ingress_mac_tstamp")
-        .set( ts.count() );
-  }
+  //
+  auto d = std::chrono::seconds{raw_pkt->time.tv_sec} + std::chrono::nanoseconds{raw_pkt->time.tv_nsec};
+  auto ts_last_rx_packet = std::chrono::system_clock::time_point( d );
 
-  // expose outgoing timestamp of the last packet, not the current one
-  // in nanosecond
-  if (phv->has_field("intrinsic_metadata.egress_mac_last_tstamp")) {
-    //shift forward to the startup moment of the switch
-    auto ts = std::chrono::duration_cast<tick>(tx_stamp_last_packet - start );
-    phv->get_field("intrinsic_metadata.egress_mac_last_tstamp")
-        .set( ts.count() );
-  }
+  //shift forward to the startup moment of the switch
+  auto ts = std::chrono::duration_cast<ts_res>(ts_last_rx_packet - start );
+  packet->ingress_mac_ts_ns = ts.count();
 
   input_buffer->push_front(
       InputBuffer::PacketType::NORMAL, std::move(packet));
@@ -400,6 +400,8 @@ SimpleSwitch::set_transmit_fn(TransmitFn fn) {
   my_transmit_fn = std::move(fn);
 }
 
+extern void ptp_update_departure_time(uint64_t packet_id, uint64_t departure_time);
+
 void
 SimpleSwitch::transmit_thread() {
   while (1) {
@@ -409,8 +411,34 @@ SimpleSwitch::transmit_thread() {
     BMELOG(packet_out, *packet);
     BMLOG_DEBUG_PKT(*packet, "Transmitting packet of size {} out of port {}",
                     packet->get_data_size(), packet->get_egress_port());
+
+    //HN
+    struct timespec tx_timestamp; //store tx timestamp of the packet
+    struct {
+      struct timespec *tx_timestamp;
+      void *data;
+    } ptr;
+    ptr.data = packet->data();
+    ptr.tx_timestamp = &tx_timestamp;
+
+    if( packet->need_to_capture_egress_mac_ts == false )
+      ptr.tx_timestamp = NULL;
+    //
+
     my_transmit_fn(packet->get_egress_port(), packet->get_packet_id(),
-                   packet->data(), packet->get_data_size());
+                   (const char *)&ptr, packet->get_data_size());
+
+    if( ptr.tx_timestamp ){
+      auto d = std::chrono::seconds{tx_timestamp.tv_sec} + std::chrono::nanoseconds{tx_timestamp.tv_nsec};
+      auto ts_tx_packet = std::chrono::system_clock::time_point( d );
+      auto ts = std::chrono::duration_cast<ts_res>(ts_tx_packet - start );
+      //ts.count();
+      ptp_update_departure_time(packet->get_packet_id(), ts.count());
+    }
+    //end HN
+
+    //my_transmit_fn(packet->get_egress_port(), packet->get_packet_id(),
+    //               packet->data(), packet->get_data_size());
   }
 }
 

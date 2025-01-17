@@ -100,6 +100,13 @@ class Packet final {
   friend class Switch;
 
  public:
+  //HN
+  //timestamp, in nanosecond, representing arrival time of the packet at its input port
+  uint64_t ingress_mac_ts_ns{0};
+  // whether we need to capture the egress timestamp when the packet is sent out its egress port
+  bool need_to_capture_egress_mac_ts{false};
+
+
   using clock = std::chrono::system_clock;
 
   using buffer_state_t = PacketBuffer::state_t;
@@ -384,7 +391,6 @@ class Packet final {
   ErrorCode error_code{ErrorCode::make_invalid()};
 
   bool checksum_error{false};
-
  private:
   static CopyIdGenerator *copy_id_gen;
 };

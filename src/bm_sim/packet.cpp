@@ -238,6 +238,9 @@ Packet::operator=(Packet &&other) noexcept {
   phv_source = other.phv_source;
   registers = other.registers;
 
+  ingress_mac_ts_ns = other.ingress_mac_ts_ns;
+  need_to_capture_egress_mac_ts = other.need_to_capture_egress_mac_ts;
+
   std::swap(buffer, other.buffer);
   std::swap(phv, other.phv);
 

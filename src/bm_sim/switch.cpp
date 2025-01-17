@@ -72,17 +72,6 @@ SwitchWContexts::receive(port_t port_num, const char *buffer, int len) {
                         len, port_num, sample_packet_data(buffer, len));
   }
 
-  //decompose buffer which contains raw packet and metadata
-  const raw_packet_t *pkt = (raw_packet_t *) buffer;
-
-  auto d = std::chrono::seconds{pkt->time.tv_sec} + std::chrono::nanoseconds{pkt->time.tv_nsec};
-  rx_stamp_last_packet = std::chrono::system_clock::time_point( d );
-
-  d = std::chrono::seconds{pkt->last_tx_stamp.tv_sec} + std::chrono::nanoseconds{pkt->last_tx_stamp.tv_nsec};
-  tx_stamp_last_packet = std::chrono::system_clock::time_point( d );
-
-  buffer = pkt->data;
-
   return receive_(port_num, buffer, len);
 }
 

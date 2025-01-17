@@ -480,3 +480,248 @@ int import_primitives(SimpleSwitch *sswitch) {
   simple_switch = sswitch;
   return 0;
 }
+
+
+
+
+//HN
+/*
+ * Copyright 2025
+ * huunghia.nguyen@montimage.eu
+ *
+ * An example of external function is avail here:
+ *    https://github.com/p4lang/behavioral-model/tree/main/examples/custom_extern
+ */
+
+#include <stdio.h>
+#include <pthread.h>
+
+typedef struct element {
+  uint64_t clock_id;
+  uint16_t port_id;
+  uint16_t sequence_id;
+  uint64_t arrival_time;
+  uint64_t departure_time;
+  uint64_t packet_id;
+} element_t;
+
+typedef struct table {
+  size_t capacity;
+  size_t head;
+  size_t size;
+  pthread_mutex_t mtx; // Mutex for thread safety
+  element_t *data;
+} table_t;
+
+// Initialize the circular table
+table_t* table_init(size_t capacity) {
+  if (capacity == 0) {
+    fprintf(stderr, "Capacity must be greater than 0\n");
+    return NULL;
+  }
+  table_t *ct = (table_t*) malloc(sizeof(table_t));
+  ct->data = (element_t*) calloc(capacity, sizeof(element_t));
+  ct->capacity = capacity;
+  ct->head = 0;
+  ct->size = 0;
+  pthread_mutex_init(&ct->mtx, NULL);
+  return ct;
+}
+
+// Free the circular table
+void table_free(table_t *ct) {
+  if (ct) {
+    free(ct->data);
+    pthread_mutex_destroy(&ct->mtx);
+    free(ct);
+  }
+}
+
+// Add an element to the circular table
+void table_store(table_t *ct, element_t value) {
+
+  memcpy(& ct->data[ct->head], &value, sizeof(element_t)); // Add value at the current head position
+
+  ct->head = (ct->head + 1) % ct->capacity; // Move head to the next position
+  if (ct->size < ct->capacity) {
+    ++ct->size; // Increment size until it reaches capacity
+  }
+}
+
+bool table_get_departure_time(table_t *ct, uint64_t clock_id, uint16_t port_id,
+    uint16_t sequence_id, uint64_t *val) {
+  for (size_t i = 0; i < ct->size; ++i) {
+    size_t actualIndex = (ct->head + ct->capacity - ct->size + i) % ct->capacity;
+    const element_t *e = & ct->data[actualIndex];
+    if (e->clock_id == clock_id && e->port_id == port_id
+        && e->sequence_id == sequence_id) {
+      *val = e->departure_time;
+      return true;
+    }
+  }
+  return false; // Return false if the element is not found
+}
+
+bool table_get_arrival_time(table_t *ct, uint64_t clock_id, uint16_t port_id,
+    uint16_t sequence_id, uint64_t *val) {
+  for (size_t i = 0; i < ct->size; ++i) {
+    size_t actualIndex = (ct->head + ct->capacity - ct->size + i) % ct->capacity;
+    const element_t *e = & ct->data[actualIndex];
+    if (e->clock_id == clock_id && e->port_id == port_id
+        && e->sequence_id == sequence_id) {
+      *val = e->arrival_time;
+      return true;
+    }
+  }
+  return false; // Return false if the element is not found
+}
+
+bool table_update_departure_time(table_t *ct, uint64_t packet_id, uint64_t departure_time) {
+  for (size_t i = 0; i < ct->size; ++i) {
+    size_t actualIndex = (ct->head + ct->capacity - ct->size + i) % ct->capacity;
+    element_t *e = & ct->data[actualIndex];
+    if (e->packet_id == packet_id) {
+      e->departure_time = departure_time;
+      return true;
+    }
+  }
+  return false; // Return false if the element is not found
+}
+
+static table_t *table = NULL;
+
+// Example custom extern function.
+void ptp_counter_init(const bm::Data & b) {
+  if( table )
+    return;
+  size_t cap = b.get<size_t>();
+  if (cap == 0) {
+    cap = 1;
+    Logger::get()->warn("hash max given as 0, but treating it as 1");
+  }
+  table = table_init( cap );
+}
+
+BM_REGISTER_EXTERN_FUNCTION(ptp_counter_init, const bm::Data &);
+
+
+#include <execinfo.h>
+#include <stdio.h>
+#include <stdlib.h>
+/* Obtain a backtrace and print it to stderr. */
+void print_execution_trace (void) {
+  void *array[10];
+  size_t size;
+  char **strings;
+  size_t i;
+  size    = backtrace (array, 10);
+  strings = backtrace_symbols (array, size);
+
+  fprintf(stderr, "Execution trace:\n");
+
+  //i=2: ignore 2 first elements in trace as they are: this fun, then mmt_log
+  for (i = 2; i < size; i++){
+     fprintf(stderr, "\t %zu. %s\n", (i-1), strings[i]);
+
+     //DEBUG_MODE given by Makefile
+     /* find first occurence of '(' or ' ' in message[i] and assume
+      * everything before that is the file name. (Don't go beyond 0 though
+      * (string terminator)*/
+     size_t p = 0, size;
+     while(strings[i][p] != '(' && strings[i][p] != ' '
+        && strings[i][p] != 0)
+      ++p;
+
+     char syscom[256];
+
+
+     size = snprintf(syscom, sizeof( syscom ), "addr2line %p -e %.*s", array[i] , (int)p, strings[i] );
+     syscom[size] = '\0';
+     //last parameter is the filename of the symbol
+
+     fprintf(stderr, "\t    ");
+     if( system(syscom) ) {}
+  }
+  free (strings);
+}
+
+
+class ptp_store_arrival_time
+  : public ActionPrimitive<Data &, const Data &, const Data &> {
+  void operator ()(Data &clockId, const Data &portId, const Data &sequenceId) {
+    pthread_mutex_lock(&table->mtx); // Ensure thread safety
+    auto &packet = get_packet();
+
+    element_t elem;
+    memset(&elem, 0, sizeof(elem));
+    elem.clock_id = clockId.get<uint64_t>();
+    elem.port_id  = portId.get<uint16_t>();
+    elem.sequence_id = sequenceId.get<uint16_t>();
+    elem.arrival_time = packet.ingress_mac_ts_ns;
+    elem.packet_id = packet.get_packet_id();
+
+    printf("==%lu. store arrival time %lu of clock_id=%lu, port_id=%u, seq_id=%u\n",
+        elem.packet_id, elem.arrival_time, elem.clock_id, elem.port_id, elem.sequence_id);
+    table_store(table, elem);
+    print_execution_trace();
+    pthread_mutex_unlock(&table->mtx); // Ensure thread safety
+  }
+};
+
+REGISTER_PRIMITIVE(ptp_store_arrival_time);
+
+
+
+class ptp_capture_departure_time
+  : public ActionPrimitive<Data &, const Data &, const Data &> {
+  void operator ()(Data &clockId, const Data &portId, const Data &sequenceId) {
+    pthread_mutex_lock(&table->mtx); // Ensure thread safety
+    auto &packet = get_packet();
+
+    packet.need_to_capture_egress_mac_ts = true;
+    pthread_mutex_unlock(&table->mtx); // Ensure thread safety
+  }
+};
+REGISTER_PRIMITIVE(ptp_capture_departure_time);
+
+
+class ptp_get_delay_time
+  : public ActionPrimitive<Data &, const Data &, const Data &, Data &> {
+  void operator ()(Data &clockId, const Data &portId, const Data &sequenceId, Data &val) {
+    pthread_mutex_lock(&table->mtx); // Ensure thread safety
+    auto &packet = get_packet();
+
+    uint64_t clock_id = clockId.get<uint64_t>();
+    uint16_t port_id  = portId.get<uint16_t>();
+    uint16_t sequence_id = sequenceId.get<uint16_t>();
+
+    uint64_t arrival_ts, departure_ts, delay;
+    table_get_arrival_time( table, clock_id, port_id, sequence_id, &arrival_ts );
+    pthread_mutex_unlock(&table->mtx); // Ensure thread safety
+
+    departure_ts = 0;
+    // wait until we got departure_time
+    while( departure_ts == 0 ){
+      pthread_mutex_lock(&table->mtx); // Ensure thread safety
+      table_get_departure_time( table, clock_id, port_id, sequence_id, &departure_ts );
+      pthread_mutex_unlock(&table->mtx); // Ensure thread safety
+      usleep(100);
+    }
+
+    delay = 0;
+    if(departure_ts > arrival_ts)
+      delay = departure_ts - arrival_ts;
+    printf("== %lu. arrival_ts=%lu, depature_ts=%lu, delay=%lu\n", packet.get_packet_id(), arrival_ts, departure_ts, delay);
+    val.set( delay );
+
+  }
+};
+REGISTER_PRIMITIVE(ptp_get_delay_time);
+
+//this function is called by the switch after sending a packet to update its depature time
+void ptp_update_departure_time(uint64_t packet_id, uint64_t departure_time){
+  pthread_mutex_lock(&table->mtx); // Ensure thread safety
+  printf("== %lu. update depature_ts=%lu\n", packet_id, departure_time);
+  table_update_departure_time(table, packet_id, departure_time);
+  pthread_mutex_unlock(&table->mtx); // Ensure thread safety
+}

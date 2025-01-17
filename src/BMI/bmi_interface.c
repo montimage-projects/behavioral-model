@@ -33,7 +33,10 @@ typedef struct bmi_interface_s {
   int fd;
   pcap_dumper_t *pcap_input_dumper;
   pcap_dumper_t *pcap_output_dumper;
-  raw_packet_t last_recv_packet;
+  struct {
+    struct timespec time;
+    const char *data;
+  } last_recv_packet;
 } bmi_interface_t;
 
 /* static get_version(int *x, int *y, int *z) { */
@@ -81,7 +84,21 @@ int bmi_interface_create(bmi_interface_t **bmi, const char *device) {
   //   By default, time stamps are in microseconds.
   // https://www.tcpdump.org/manpages/pcap_set_tstamp_precision.3pcap.html
   if(pcap_set_tstamp_precision(bmi_->pcap, PCAP_TSTAMP_PRECISION_NANO) != 0){
-    printf("failled to the precision of the time stamp to nanosecond\n");
+    printf("failled to set the precision of the time stamp to nanosecond\n");
+    pcap_close(bmi_->pcap);
+    free(bmi_);
+    return -1;
+  }
+  /*
+  if( pcap_set_tstamp_type(bmi_->pcap, PCAP_TSTAMP_ADAPTER) != 0){
+    printf("failled to set the tstamp type\n");
+    pcap_close(bmi_->pcap);
+    free(bmi_);
+    return -1;
+  }
+  */
+  if( pcap_set_immediate_mode(bmi_->pcap, 1) != 0){
+    printf("failled to set immediate mode\n");
     pcap_close(bmi_->pcap);
     free(bmi_);
     return -1;
@@ -229,6 +246,7 @@ int get_tx_timestamp( int sock, struct timespec *tx_timestamp ){
 		printf("   cmsg len %zu: ", cmsg->cmsg_len);
 		if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SO_TIMESTAMPING) {
 			struct timespec *ts = (struct timespec *)CMSG_DATA(cmsg);
+			printf("   => timestamp: %lu.%09lu\n", ts->tv_sec, ts->tv_nsec);
 			tx_timestamp->tv_sec  = ts->tv_sec;
 			tx_timestamp->tv_nsec = ts->tv_nsec;
 
@@ -248,6 +266,16 @@ int get_tx_timestamp( int sock, struct timespec *tx_timestamp ){
 	return 1;
 }
 int bmi_interface_send(bmi_interface_t *bmi, const char *data, int len) {
+
+  //HN: wrap data to a struct
+  struct {
+    struct timespec *tx_timestamp;
+    const void *data;
+  } *ptr = data;
+
+  data = ptr->data;
+  //
+
   if(bmi->pcap_output_dumper) {
     struct pcap_pkthdr pkt_header;
     memset(&pkt_header, 0, sizeof(pkt_header));
@@ -272,13 +300,14 @@ int bmi_interface_send(bmi_interface_t *bmi, const char *data, int len) {
 
   int ret = pcap_sendpacket(bmi->pcap, (unsigned char *) data, len);
 
-  get_tx_timestamp( bmi->fd, &bmi->last_recv_packet.last_tx_stamp );
+  if( ptr->tx_timestamp != NULL )
+    get_tx_timestamp( bmi->fd, ptr->tx_timestamp );
 
   return ret;
 }
 
 /* Does not make a copy! */
-int bmi_interface_recv(bmi_interface_t *bmi, const raw_packet_t **data) {
+int bmi_interface_recv(bmi_interface_t *bmi, const char **data) {
   struct pcap_pkthdr *pkt_header;
   const unsigned char *pkt_data;
 
@@ -307,7 +336,6 @@ int bmi_interface_recv(bmi_interface_t *bmi, const raw_packet_t **data) {
   bmi->last_recv_packet.time.tv_nsec = pkt_header->ts.tv_usec;
 
   bmi->last_recv_packet.data = pkt_data;
-  bmi->last_recv_packet.len  = pkt_header->len;
 
   *data = (const char*) &bmi->last_recv_packet;
 

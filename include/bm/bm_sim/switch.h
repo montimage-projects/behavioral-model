@@ -101,7 +101,6 @@ class SwitchWContexts : public DevMgr, public RuntimeInterface {
   friend class Switch;
 
 protected:
-  std::chrono::high_resolution_clock::time_point rx_stamp_last_packet, tx_stamp_last_packet;
 
  public:
   //! To enable live swapping of P4-JSON configurations, enable_swap needs to be
