@@ -584,6 +584,7 @@ void ptp_counter_init(const bm::Data & b) {
   }
   table = table_init( cap );
   pthread_mutex_init(&mutex, NULL);
+  Logger::get()->info("Init ptp counter table size {}", cap);
 }
 
 BM_REGISTER_EXTERN_FUNCTION(ptp_counter_init, const bm::Data &);

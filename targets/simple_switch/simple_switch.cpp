@@ -281,7 +281,7 @@ SimpleSwitch::receive_(port_t port_num, const char *buffer, int len) {
   auto ts_last_rx_packet = std::chrono::system_clock::time_point( d );
 
   //shift forward to the startup moment of the switch
-  auto ts = std::chrono::duration_cast<ts_res>(ts_last_rx_packet - start );
+  auto ts = std::chrono::duration_cast<std::chrono::nanoseconds>(ts_last_rx_packet - start );
   packet->ingress_mac_ts_ns = ts.count();
 
   input_buffer->push_front(
@@ -431,7 +431,7 @@ SimpleSwitch::transmit_thread() {
     if( ptr.tx_timestamp ){
       auto d = std::chrono::seconds{tx_timestamp.tv_sec} + std::chrono::nanoseconds{tx_timestamp.tv_nsec};
       auto ts_tx_packet = std::chrono::system_clock::time_point( d );
-      auto ts = std::chrono::duration_cast<ts_res>(ts_tx_packet - start );
+      auto ts = std::chrono::duration_cast<std::chrono::nanoseconds>(ts_tx_packet - start );
       //ts.count();
       ptp_update_departure_time(packet->get_packet_id(), ts.count());
     }
