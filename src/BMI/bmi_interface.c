@@ -170,101 +170,107 @@ int bmi_interface_add_dumper(bmi_interface_t *bmi, const char *filename, bmi_dum
 
 // Function to extract the PCP field from a VLAN-tagged Ethernet frame
 int extract_pcp(const uint8_t *frame, size_t frame_length) {
-    if (frame_length < ETHERNET_HEADER_SIZE + VLAN_TAG_SIZE) {
-        //printf("Frame is too short to contain a VLAN tag.\n");
-        return -1;  // Indicate error
-    }
+  if (frame_length < ETHERNET_HEADER_SIZE + VLAN_TAG_SIZE) {
+    //printf("Frame is too short to contain a VLAN tag.\n");
+    return -1;  // Indicate error
+  }
 
-    // Check if the frame contains a VLAN tag by examining the EtherType/TPID field
-    uint16_t ether_type;
-    memcpy(&ether_type, frame + 12, sizeof(ether_type));  // EtherType is after 12 bytes
-    ether_type = ntohs(ether_type);  // Convert from network byte order to host byte order
+  // Check if the frame contains a VLAN tag by examining the EtherType/TPID field
+  uint16_t ether_type;
+  memcpy(&ether_type, frame + 12, sizeof(ether_type));  // EtherType is after 12 bytes
+  ether_type = ntohs(ether_type);  // Convert from network byte order to host byte order
 
-    if (ether_type == TPID_VLAN) {
-        // Frame contains a VLAN tag
-        uint16_t tci;  // Tag Control Information (TCI)
-        memcpy(&tci, frame + ETHERNET_HEADER_SIZE, sizeof(tci));  // TCI starts after Ethernet header
-        tci = ntohs(tci);  // Convert from network byte order to host byte order
+  if (ether_type == TPID_VLAN) {
+    // Frame contains a VLAN tag
+    uint16_t tci;  // Tag Control Information (TCI)
+    memcpy(&tci, frame + ETHERNET_HEADER_SIZE, sizeof(tci));  // TCI starts after Ethernet header
+    tci = ntohs(tci);  // Convert from network byte order to host byte order
 
-        // Extract the PCP field (first 3 bits of TCI)
-        int pcp = (tci >> 13) & 0x07;  // Right shift by 13 bits, mask the first 3 bits (PCP)
+    // Extract the PCP field (first 3 bits of TCI)
+    int pcp = (tci >> 13) & 0x07;  // Right shift by 13 bits, mask the first 3 bits (PCP)
 
-        return pcp;  // Return the extracted PCP value
-    } else {
-        //printf("No VLAN tag present in the frame.\n");
-        return -1;  // Indicate error
-    }
+    return pcp;  // Return the extracted PCP value
+  } else {
+    //printf("No VLAN tag present in the frame.\n");
+    return -1;  // Indicate error
+  }
 }
 
 
 int get_tx_timestamp( int sock, struct timespec *tx_timestamp ){
-	struct msghdr msg;
-	struct iovec iov;
-	char control[1024];
-	struct cmsghdr *cmsg;
-	int ret;
-	struct sockaddr_in from_addr;
-	char rcv_data[4096];
+  struct msghdr msg;
+  struct iovec iov;
+  char control[1024];
+  struct cmsghdr *cmsg;
+  int ret;
+  struct sockaddr_in from_addr;
+  char rcv_data[4096];
 
-	// Retrieve TX timestamp
-	memset(&iov, 0, sizeof(iov));
-	iov.iov_base = (void*) rcv_data;
-	iov.iov_len = sizeof(rcv_data);
+  // Retrieve TX timestamp
+  memset(&iov, 0, sizeof(iov));
+  iov.iov_base = (void*) rcv_data;
+  iov.iov_len = sizeof(rcv_data);
 
-	memset(&msg, 0, sizeof(msg));
-	msg.msg_iov = &iov;
-	msg.msg_iovlen = 1;
-	msg.msg_control = control;
-	msg.msg_controllen = sizeof(control);
+  memset(&msg, 0, sizeof(msg));
+  msg.msg_iov = &iov;
+  msg.msg_iovlen = 1;
+  msg.msg_control = control;
+  msg.msg_controllen = sizeof(control);
 
-	memset(&from_addr, 0, sizeof(from_addr));
-	msg.msg_name = (caddr_t)&from_addr;
-	msg.msg_namelen = sizeof(from_addr);
+  memset(&from_addr, 0, sizeof(from_addr));
+  msg.msg_name = (caddr_t)&from_addr;
+  msg.msg_namelen = sizeof(from_addr);
 
-	/*
-	 * Fetch message from error queue.
-	 * For transmit timestamps the outgoing packet is looped back to
-	 *   the socket"s error queue with the send timestamp(s) attached.
-	 * See 2.1.1 in https://www.kernel.org/doc/html/latest/networking/timestamping.html
-	 */
-	ret = recvmsg(sock, &msg, MSG_ERRQUEUE);
-	if( ret < 0 )
-		printf("recvmsg tx timestamp failed");
+  struct timeval now;
+  gettimeofday(&now, 0);
 
-	struct timeval now;
-	gettimeofday(&now, 0);
+  /*
+   * Fetch message from error queue.
+   * For transmit timestamps the outgoing packet is looped back to
+   *   the socket"s error queue with the send timestamp(s) attached.
+   * See 2.1.1 in https://www.kernel.org/doc/html/latest/networking/timestamping.html
+   */
+  ret = recvmsg(sock, &msg, MSG_ERRQUEUE);
+  if( ret < 0 ){
+    printf("%ld.%06ld: recvmsg tx timestamp failed (%d: %s)\n",
+        (long)now.tv_sec, (long)now.tv_usec,
+        errno, strerror(errno));
+    return 1;
+  }
 
-	printf("%ld.%06ld: received %s data, %d bytes from %s, %zu bytes control messages\n",
-	       (long)now.tv_sec, (long)now.tv_usec,
-	       "regular",
-	       ret,
-		   inet_ntoa(from_addr.sin_addr),
-	       msg.msg_controllen);
+  //printf("%ld.%06ld: received %s data, %d bytes from %s, %zu bytes control messages\n",
+  //       (long)now.tv_sec, (long)now.tv_usec,
+  //       "regular",
+  //       ret,
+  //	   inet_ntoa(from_addr.sin_addr),
+  //       msg.msg_controllen);
 
-	// Parse control message for TX timestamp
-	for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
-		printf("   cmsg len %zu: ", cmsg->cmsg_len);
-		if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SO_TIMESTAMPING) {
-			struct timespec *ts = (struct timespec *)CMSG_DATA(cmsg);
-			printf("   => timestamp: %lu.%09lu\n", ts->tv_sec, ts->tv_nsec);
-			tx_timestamp->tv_sec  = ts->tv_sec;
-			tx_timestamp->tv_nsec = ts->tv_nsec;
+  // Parse control message for TX timestamp
+  for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+    //printf("   cmsg len %zu: ", cmsg->cmsg_len);
+    if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SO_TIMESTAMPING) {
+      struct timespec *ts = (struct timespec *)CMSG_DATA(cmsg);
+      //printf("   => timestamp: %lu.%09lu\n", ts->tv_sec, ts->tv_nsec);
+      tx_timestamp->tv_sec  = ts->tv_sec;
+      tx_timestamp->tv_nsec = ts->tv_nsec;
 
-			printf("SO_TIMESTAMPING ");
-			printf("SW %ld.%09ld ",
-			       (long)ts->tv_sec,
-			       (long)ts->tv_nsec);
-			ts++;
-							/* skip deprecated HW transformed */
-			ts++;
-			printf("HW raw %ld.%09ld \n",
-				   (long)ts->tv_sec,
-				   (long)ts->tv_nsec);
-			return 0;
-		}
-	}
-	return 1;
+      //printf("SO_TIMESTAMPING ");
+      //printf("SW %ld.%09ld ",
+      //       (long)ts->tv_sec,
+      //       (long)ts->tv_nsec);
+      //ts++;
+      /* skip deprecated HW transformed */
+      //ts++;
+      //printf("HW raw %ld.%09ld \n",
+      //	   (long)ts->tv_sec,
+      //	   (long)ts->tv_nsec);
+      return 0;
+    }
+  }
+  return 1;
 }
+
+
 int bmi_interface_send(bmi_interface_t *bmi, const char *data, int len) {
 
   //HN: wrap data to a struct
