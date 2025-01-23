@@ -604,7 +604,7 @@ class ptp_store_ingress_mac_tstamp
     elem.arrival_time = packet.ingress_mac_ts_ns;
     elem.packet_id = packet.get_packet_id();
 
-    Logger::get()->debug("Store arrival time {} of clock_id={}, port_id={}, seq_id={} of packet {}",
+    Logger::get()->debug("Store ingress_mac_tstamp {} of clock_id={}, port_id={}, seq_id={} of packet {}",
         elem.arrival_time, elem.clock_id, elem.port_id, elem.sequence_id, elem.packet_id);
 
     //perhaps we got another packet having the same 3-tuple (clock_id, port_id, seq_id)
@@ -638,7 +638,7 @@ class ptp_capture_egress_mac_tstamp
     elem.sequence_id = sequenceId.get<uint16_t>();
     elem.packet_id = packet.get_packet_id();
 
-    Logger::get()->debug("Enable to capture depature time of clock_id={}, port_id={}, seq_id={} of packet {}",
+    Logger::get()->debug("Enable to capture egress_mac_tstamp of clock_id={}, port_id={}, seq_id={} of packet {}",
         elem.clock_id, elem.port_id, elem.sequence_id, elem.packet_id);
 
     //perhaps we got another packet having the same 3-tuple (clock_id, port_id, seq_id)
@@ -758,7 +758,6 @@ void ptp_update_departure_time(uint64_t packet_id, uint64_t departure_time){
   element_t *elem;
   pthread_mutex_lock(&mutex); // Ensure thread safety
 
-  Logger::get()->info("Update depature_ts={} of packet {}", departure_time, packet_id);
 
   elem = table_find_by_packet_id(table, packet_id);
   if( elem )
@@ -766,7 +765,7 @@ void ptp_update_departure_time(uint64_t packet_id, uint64_t departure_time){
   else
     Logger::get()->warn("No place for departure time. The packet %{} was not stored.", packet_id);
 
-  Logger::get()->debug("Store depature time {} of clock_id={}, port_id={}, seq_id={} of packet {}",
+  Logger::get()->debug("Store egress_mac_tstamp {} of clock_id={}, port_id={}, seq_id={} of packet {}",
       departure_time, elem->clock_id, elem->port_id, elem->sequence_id, elem->packet_id);
 
 
