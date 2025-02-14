@@ -692,8 +692,11 @@ class ptp_get_egress_mac_tstamp
 
       if( departure_ts != 0 )
         break;
-      else
-        usleep(100);
+      else{
+        Logger::get()->debug("Wait for egress_mac_tstamp {} of clock_id={}, port_id={}, seq_id={} of packet {}",
+                departure_ts, clock_id, port_id, sequence_id, elem->packet_id);
+        usleep(10);
+      }
     }
 
     if( elem )
@@ -756,18 +759,18 @@ REGISTER_PRIMITIVE(ptp_get_ingress_mac_tstamp);
 //this function is called by the switch after sending a packet to update its depature time
 void ptp_update_departure_time(uint64_t packet_id, uint64_t departure_time){
   element_t *elem;
-  pthread_mutex_lock(&mutex); // Ensure thread safety
 
+  pthread_mutex_lock(&mutex); // Ensure thread safety
 
   elem = table_find_by_packet_id(table, packet_id);
   if( elem )
     elem->departure_time = departure_time;
-  else
+  pthread_mutex_unlock(&mutex); // Ensure thread safety
+
+  if( !elem )
     Logger::get()->warn("No place for departure time. The packet %{} was not stored.", packet_id);
 
   Logger::get()->debug("Store egress_mac_tstamp {} of clock_id={}, port_id={}, seq_id={} of packet {}",
       departure_time, elem->clock_id, elem->port_id, elem->sequence_id, elem->packet_id);
 
-
-  pthread_mutex_unlock(&mutex); // Ensure thread safety
 };

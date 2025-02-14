@@ -277,12 +277,8 @@ SimpleSwitch::receive_(port_t port_num, const char *buffer, int len) {
   // in nanosecond
   // https://github.com/p4lang/p4c/blob/main/backends/tofino/bf-p4c/p4include/tofino2_base.p4#L135
   //
-  auto d = std::chrono::seconds{raw_pkt->time.tv_sec} + std::chrono::nanoseconds{raw_pkt->time.tv_nsec};
-  auto ts_last_rx_packet = std::chrono::system_clock::time_point( d );
-
-  //shift forward to the startup moment of the switch
-  auto ts = std::chrono::duration_cast<std::chrono::nanoseconds>(ts_last_rx_packet - start );
-  packet->ingress_mac_ts_ns = ts.count();
+  //use number of nanosecond since epoch
+  packet->ingress_mac_ts_ns = raw_pkt->time.tv_sec * 1000*1000*1000 + raw_pkt->time.tv_nsec;
 
   input_buffer->push_front(
       InputBuffer::PacketType::NORMAL, std::move(packet));
@@ -429,11 +425,8 @@ SimpleSwitch::transmit_thread() {
                    (const char *)&ptr, packet->get_data_size());
 
     if( ptr.tx_timestamp ){
-      auto d = std::chrono::seconds{tx_timestamp.tv_sec} + std::chrono::nanoseconds{tx_timestamp.tv_nsec};
-      auto ts_tx_packet = std::chrono::system_clock::time_point( d );
-      auto ts = std::chrono::duration_cast<std::chrono::nanoseconds>(ts_tx_packet - start );
-      //ts.count();
-      ptp_update_departure_time(packet->get_packet_id(), ts.count());
+      //use number of nanosecond since epoch
+      ptp_update_departure_time(packet->get_packet_id(), tx_timestamp.tv_sec * 1000*1000*1000 + tx_timestamp.tv_nsec);
     }
     //end HN
 
