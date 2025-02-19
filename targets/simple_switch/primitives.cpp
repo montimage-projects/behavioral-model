@@ -584,7 +584,7 @@ void ptp_counter_init(const bm::Data & b) {
   }
   table = table_init( cap );
   pthread_mutex_init(&mutex, NULL);
-  Logger::get()->info("Init ptp counter table size {}", cap);
+  Logger::get()->info("Initialized PTP counter table size {}", cap);
 }
 
 BM_REGISTER_EXTERN_FUNCTION(ptp_counter_init, const bm::Data &);
@@ -593,7 +593,6 @@ BM_REGISTER_EXTERN_FUNCTION(ptp_counter_init, const bm::Data &);
 class ptp_store_ingress_mac_tstamp
   : public ActionPrimitive<Data &, const Data &, const Data &> {
   void operator ()(Data &clockId, const Data &portId, const Data &sequenceId) {
-    pthread_mutex_lock(&mutex); // Ensure thread safety
     auto &packet = get_packet();
 
     element_t elem, *ex;
@@ -604,19 +603,21 @@ class ptp_store_ingress_mac_tstamp
     elem.arrival_time = packet.ingress_mac_ts_ns;
     elem.packet_id = packet.get_packet_id();
 
-    Logger::get()->debug("Store ingress_mac_tstamp {} of clock_id={}, port_id={}, seq_id={} of packet {}",
-        elem.arrival_time, elem.clock_id, elem.port_id, elem.sequence_id, elem.packet_id);
-
+    pthread_mutex_lock(&mutex); // Ensure thread safety
     //perhaps we got another packet having the same 3-tuple (clock_id, port_id, seq_id)
     // => ignore the latest one
     ex = table_find(table, elem.clock_id, elem.port_id, elem.sequence_id);
+    if( ex == NULL)
+      table_store(table, elem);
+    pthread_mutex_unlock(&mutex); // Ensure thread safety
+
     if( ex != NULL)
       Logger::get()->warn("Duplication detected (clock_id={}, port_id={}, seq_id={} was seen at packet {}). Ignore",
           ex->clock_id, ex->port_id, ex->sequence_id, ex->packet_id);
     else
-      table_store(table, elem);
+      Logger::get()->debug("Stored ingress_mac_tstamp {} of clock_id={}, port_id={}, seq_id={} of packet {}",
+        elem.arrival_time, elem.clock_id, elem.port_id, elem.sequence_id, elem.packet_id);
 
-    pthread_mutex_unlock(&mutex); // Ensure thread safety
   }
 };
 
@@ -627,7 +628,7 @@ REGISTER_PRIMITIVE(ptp_store_ingress_mac_tstamp);
 class ptp_capture_egress_mac_tstamp
   : public ActionPrimitive<Data &, const Data &, const Data &> {
   void operator ()(Data &clockId, const Data &portId, const Data &sequenceId) {
-    pthread_mutex_lock(&mutex); // Ensure thread safety
+
     auto &packet = get_packet();
 
     //store a placeholder in the table if it is not existing
@@ -638,19 +639,19 @@ class ptp_capture_egress_mac_tstamp
     elem.sequence_id = sequenceId.get<uint16_t>();
     elem.packet_id = packet.get_packet_id();
 
-    Logger::get()->debug("Enable to capture egress_mac_tstamp of clock_id={}, port_id={}, seq_id={} of packet {}",
-        elem.clock_id, elem.port_id, elem.sequence_id, elem.packet_id);
-
+    pthread_mutex_lock(&mutex); // Ensure thread safety
     //perhaps we got another packet having the same 3-tuple (clock_id, port_id, seq_id)
     // this happens when ptp_store_ingress_mac_tstamp was called before this function
     // => ignore
     ex = table_find(table, elem.clock_id, elem.port_id, elem.sequence_id);
     if( ex == NULL)
       table_store(table, elem);
-
+    pthread_mutex_unlock(&mutex); // Ensure thread safety
 
     packet.need_to_capture_egress_mac_ts = true;
-    pthread_mutex_unlock(&mutex); // Ensure thread safety
+
+    Logger::get()->debug("Enabled to capture egress_mac_tstamp of clock_id={}, port_id={}, seq_id={} of packet {}",
+        elem.clock_id, elem.port_id, elem.sequence_id, elem.packet_id);
   }
 };
 REGISTER_PRIMITIVE(ptp_capture_egress_mac_tstamp);
@@ -715,8 +716,8 @@ REGISTER_PRIMITIVE(ptp_get_egress_mac_tstamp);
  * Get ingress_mac_tstamp of the current packet
  */
 class get_ingress_mac_tstamp
-  : public ActionPrimitive<Data &, const Data &, const Data &, Data &> {
-  void operator ()(Data &clockId, const Data &portId, const Data &sequenceId, Data &val) {
+  : public ActionPrimitive<Data &> {
+  void operator ()(Data &val) {
     auto &packet = get_packet();
     val.set( packet.ingress_mac_ts_ns );
   }
@@ -731,7 +732,6 @@ REGISTER_PRIMITIVE(get_ingress_mac_tstamp);
 class ptp_get_ingress_mac_tstamp
   : public ActionPrimitive<Data &, const Data &, const Data &, Data &> {
   void operator ()(Data &clockId, const Data &portId, const Data &sequenceId, Data &val) {
-    pthread_mutex_lock(&mutex); // Ensure thread safety
 
     uint64_t clock_id = clockId.get<uint64_t>();
     uint16_t port_id  = portId.get<uint16_t>();
@@ -740,23 +740,27 @@ class ptp_get_ingress_mac_tstamp
     uint64_t arrival_ts = 0;
     element_t *elem;
 
+    pthread_mutex_lock(&mutex); // Ensure thread safety
     elem = table_find( table, clock_id, port_id, sequence_id );
     if( elem != NULL )
       arrival_ts = elem->arrival_time;
+    pthread_mutex_unlock(&mutex); // Ensure thread safety
 
-    Logger::get()->debug("Got arrival time {} of clock_id={}, port_id={}, seq_id={} of packet {}",
+    if (elem)
+      Logger::get()->debug("Got ingress_mac_tstamp {} of clock_id={}, port_id={}, seq_id={} of packet {}",
+        arrival_ts, elem->clock_id, elem->port_id, elem->sequence_id, elem->packet_id);
+    else
+      Logger::get()->warn("Not found ingress_mac_tstamp {} of clock_id={}, port_id={}, seq_id={} of packet {}",
         arrival_ts, elem->clock_id, elem->port_id, elem->sequence_id, elem->packet_id);
 
 
     val.set( arrival_ts );
-    pthread_mutex_unlock(&mutex); // Ensure thread safety
-
   }
 };
 REGISTER_PRIMITIVE(ptp_get_ingress_mac_tstamp);
 
 
-//this function is called by the switch after sending a packet to update its depature time
+//this function is called by the switch after sending a packet to updegress_mac_tstampate its depature time
 void ptp_update_departure_time(uint64_t packet_id, uint64_t departure_time){
   element_t *elem;
 
@@ -769,8 +773,8 @@ void ptp_update_departure_time(uint64_t packet_id, uint64_t departure_time){
 
   if( !elem )
     Logger::get()->warn("No place for departure time. The packet %{} was not stored.", packet_id);
-
-  Logger::get()->debug("Store egress_mac_tstamp {} of clock_id={}, port_id={}, seq_id={} of packet {}",
+  else
+    Logger::get()->debug("Stored egress_mac_tstamp {} of clock_id={}, port_id={}, seq_id={} of packet {}",
       departure_time, elem->clock_id, elem->port_id, elem->sequence_id, elem->packet_id);
 
 };

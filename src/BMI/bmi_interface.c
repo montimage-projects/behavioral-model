@@ -25,6 +25,7 @@
 
 #include <pcap/pcap.h>
 #include <errno.h>
+#include <time.h>
 #include <linux/net_tstamp.h>
 #include "bmi_interface.h"
 
@@ -97,8 +98,18 @@ int bmi_interface_create(bmi_interface_t **bmi, const char *device) {
     return -1;
   }
   */
+  //packets are delivered immediately as they arrive, instead of being buffered.
   if( pcap_set_immediate_mode(bmi_->pcap, 1) != 0){
     printf("failled to set immediate mode\n");
+    pcap_close(bmi_->pcap);
+    free(bmi_);
+    return -1;
+  }
+
+  //pcap_dispatch() or pcap_next_ex() operates in non-blocking mode.
+  // e.g., these functions return immediately even if no packets are available.
+  if( pcap_setnonblock(bmi_->pcap, 1, errbuf) != 0){
+    printf("failled to set nonblock mode: %s\n", errbuf);
     pcap_close(bmi_->pcap);
     free(bmi_);
     return -1;
@@ -222,7 +233,10 @@ int get_tx_timestamp( int sock, struct timespec *tx_timestamp ){
   msg.msg_namelen = sizeof(from_addr);
 
   struct timeval now;
-  gettimeofday(&now, 0);
+
+  //struct timespec start_ts, end_ts;
+  //clock_gettime(CLOCK_REALTIME, &start_ts);
+  //printf("starting get tx_timestamp at: %ld.%09ld\n", start_ts.tv_sec, start_ts.tv_nsec);
 
   /*
    * Fetch message from error queue.
@@ -232,18 +246,12 @@ int get_tx_timestamp( int sock, struct timespec *tx_timestamp ){
    */
   ret = recvmsg(sock, &msg, MSG_ERRQUEUE);
   if( ret < 0 ){
+    gettimeofday(&now, 0);
     printf("%ld.%06ld: recvmsg tx timestamp failed (%d: %s)\n",
         (long)now.tv_sec, (long)now.tv_usec,
         errno, strerror(errno));
     return 1;
   }
-
-  //printf("%ld.%06ld: received %s data, %d bytes from %s, %zu bytes control messages\n",
-  //       (long)now.tv_sec, (long)now.tv_usec,
-  //       "regular",
-  //       ret,
-  //	   inet_ntoa(from_addr.sin_addr),
-  //       msg.msg_controllen);
 
   // Parse control message for TX timestamp
   for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
@@ -264,6 +272,8 @@ int get_tx_timestamp( int sock, struct timespec *tx_timestamp ){
       //printf("HW raw %ld.%09ld \n",
       //	   (long)ts->tv_sec,
       //	   (long)ts->tv_nsec);
+      //clock_gettime(CLOCK_REALTIME, &end_ts);
+      //printf("time to get tx_timestamp: %ld ns\n", (end_ts.tv_sec - start_ts.tv_sec)*1000*1000*1000 + (end_ts.tv_nsec - start_ts.tv_nsec) );
       return 0;
     }
   }
@@ -304,11 +314,13 @@ int bmi_interface_send(bmi_interface_t *bmi, const char *data, int len) {
     oval = SOF_TIMESTAMPING_TX_SOFTWARE | SOF_TIMESTAMPING_SOFTWARE;
 
   if ( setsockopt( bmi->fd, SOL_SOCKET, SO_TIMESTAMPING, &oval, sizeof(oval) ) < 0 ){
-    printf("error when setting timestamping: %s\n", strerror(errno) );
+    fprintf(stderr, "error when setting timestamping: %s\n", strerror(errno) );
     exit(1);
   }
 
   int ret = pcap_sendpacket(bmi->pcap, (unsigned char *) data, len);
+  if( ret )
+    fprintf(stderr, "Error sending packet: %s\n", pcap_geterr(bmi->pcap));
 
   if( need_to_capture_tx_tstamp )
     get_tx_timestamp( bmi->fd, ptr->tx_timestamp );
