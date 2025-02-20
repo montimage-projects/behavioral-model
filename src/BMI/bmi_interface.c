@@ -21,9 +21,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <sys/socket.h>
 
 #include <pcap/pcap.h>
+#include <sys/socket.h>
 #include <errno.h>
 #include <time.h>
 #include <linux/net_tstamp.h>

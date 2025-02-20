@@ -391,6 +391,7 @@ class Packet final {
   ErrorCode error_code{ErrorCode::make_invalid()};
 
   bool checksum_error{false};
+
  private:
   static CopyIdGenerator *copy_id_gen;
 };

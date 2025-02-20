@@ -104,8 +104,4 @@ VERSION-build
 
 core
 vgcore*
-/.autotools
-/.cproject
-/.project
-/.settings/
-/.externalToolBuilders/
+
